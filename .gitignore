@@ -1,0 +1,6 @@
+build-win/
+out/
+*.exe
+*.pdb
+*.o
+*.log

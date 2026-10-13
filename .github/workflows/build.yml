@@ -1,0 +1,65 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      # gawk (header generation) ships with Git for Windows on the runner.
+      - name: Put Git's gawk on PATH
+        shell: powershell
+        run: Add-Content $env:GITHUB_PATH 'C:\Program Files\Git\usr\bin'
+
+      - name: Build
+        shell: powershell
+        run: .\build-win.ps1 -Arch ${{ matrix.arch }} -OutDir out\${{ matrix.arch }}
+
+      - name: Smoke test
+        if: matrix.arch == 'x64'
+        shell: powershell
+        run: |
+          out\x64\rsync.exe --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsync-windows-${{ matrix.arch }}
+          path: out/${{ matrix.arch }}/rsync.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Zip
+        shell: powershell
+        run: |
+          foreach ($a in 'x64', 'arm64') {
+            Compress-Archive -Path "dist\rsync-windows-$a\rsync.exe" -DestinationPath "rsync-windows-$a-${{ github.ref_name }}.zip"
+          }
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: rsync-windows-*.zip
